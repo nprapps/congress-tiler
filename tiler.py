@@ -70,8 +70,6 @@ def make_promotion_thumb():
         resized = congress_image.resize((image_width, new_height), Image.ANTIALIAS)
         coordinates[1] = coordinates[1] + last_y
 
-        print coordinates
-
         image.paste(resized, tuple(coordinates))
         last_y = new_height
         total_height += new_height
