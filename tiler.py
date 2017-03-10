@@ -1,32 +1,38 @@
 #from urllib3.contrib import pyopenssl
 #pyopenssl.inject_into_urllib3()
 
-import csv
+import logging
+import os
 import random
 import requests
-import cStringIO
-import os
 
 from PIL import Image
 
 
-TOTAL_IMAGES = 40
+DATA_URL = 'http://staging.project.wnyc.org/healthcare-stance/assets/data/all-states.json'
 IMAGE_COLUMNS = 10
+LOG_FORMAT = '%(levelname)s:%(name)s:%(asctime)s: %(message)s'
 PROMOTION_IMAGE_WIDTH = 3000
+TOTAL_IMAGES = 40
 URL_TEMPLATE = 'https://theunitedstates.io/images/congress/450x550/%s.jpg'
+
+logging.basicConfig(format=LOG_FORMAT)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+def get_ids():
+    resp = requests.get(DATA_URL)
+    ids = [row['bioguideid'] for row in resp.json() if row.get('edited')]
+    return ids
 
 
 def make_promotion_thumb():
     images_per_column = TOTAL_IMAGES / IMAGE_COLUMNS
     image_width = PROMOTION_IMAGE_WIDTH / IMAGE_COLUMNS
     max_height = int(image_width * images_per_column * 1.5)
-    thumb_size = [image_width, image_width]
     image = Image.new('RGB', [PROMOTION_IMAGE_WIDTH, max_height])
 
-    # Open the books JSON.
-    with open('congress-ids.csv') as f:
-        reader = csv.reader(f)
-        ids = list(reader)[1:]
+    ids = get_ids()
 
     seen = []
 
@@ -38,7 +44,7 @@ def make_promotion_thumb():
 
     i = 0
     while i < TOTAL_IMAGES:
-        id = random.choice(ids)[0]
+        id = random.choice(ids)
         if id in seen:
             continue
 
@@ -46,6 +52,7 @@ def make_promotion_thumb():
 
         if not os.path.isfile(imgpath):
             url = URL_TEMPLATE % id
+            logger.info('Getting {0}'.format(url))
             os.system('wget -q %s -P img' % url)
 
         seen.append(id)
