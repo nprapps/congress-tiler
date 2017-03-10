@@ -1,87 +1,87 @@
-#from urllib3.contrib import pyopenssl
-#pyopenssl.inject_into_urllib3()
-
-import csv
+import logging
+import os
 import random
 import requests
-import cStringIO
-import os
 
 from PIL import Image
+from cropped_thumbnail import cropped_thumbnail
+
+BASE_WIDTH = 450
+BASE_HEIGHT = 550
+IMAGE_COLUMNS = 9
+ASPECT_RATIO = 16/9.
+DATA_URL = 'http://staging.project.wnyc.org/healthcare-stance/assets/data/all-states.json'
+LOG_FORMAT = '%(levelname)s:%(name)s:%(asctime)s: %(message)s'
+URL_TEMPLATE = 'https://theunitedstates.io/images/congress/{0}x{1}/%s.jpg'.format(BASE_WIDTH, BASE_HEIGHT)
+
+logging.basicConfig(format=LOG_FORMAT)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
-TOTAL_IMAGES = 40
-IMAGE_COLUMNS = 10
-PROMOTION_IMAGE_WIDTH = 3000
-URL_TEMPLATE = 'https://theunitedstates.io/images/congress/450x550/%s.jpg'
+def get_ids():
+    resp = requests.get(DATA_URL)
+    ids = [row['bioguideid'] for row in resp.json() if row.get('edited')]
+    return ids
+
+
+def calculate_rows():
+    rows = 1 / ASPECT_RATIO * IMAGE_COLUMNS * BASE_WIDTH / BASE_HEIGHT
+    return int(round(rows))
+
+
+def get_image(id):
+    imgpath = 'img/%s.jpg' % id
+
+    if not os.path.isfile(imgpath):
+        url = URL_TEMPLATE % id
+        logger.info('Getting {0}'.format(url))
+        os.system('wget -q %s -P img' % url)
+
+    return imgpath
 
 
 def make_promotion_thumb():
-    images_per_column = TOTAL_IMAGES / IMAGE_COLUMNS
-    image_width = PROMOTION_IMAGE_WIDTH / IMAGE_COLUMNS
-    max_height = int(image_width * images_per_column * 1.5)
-    thumb_size = [image_width, image_width]
-    image = Image.new('RGB', [PROMOTION_IMAGE_WIDTH, max_height])
+    rows = calculate_rows()
 
-    # Open the books JSON.
-    with open('congress-ids.csv') as f:
-        reader = csv.reader(f)
-        ids = list(reader)[1:]
+    image = Image.new('RGB', [IMAGE_COLUMNS * BASE_WIDTH, rows * BASE_HEIGHT])
+
+    ids = get_ids()
 
     seen = []
-
     coordinates = [0, 0]
-    last_y = 0
-    total_height = 0
-    min_height = None
-    column_multiplier = 0
 
     i = 0
-    while i < TOTAL_IMAGES:
-        id = random.choice(ids)[0]
-        if id in seen:
-            continue
 
-        imgpath = 'img/%s.jpg' % id
+    while i < rows:
+        j = 0
 
-        if not os.path.isfile(imgpath):
-            url = URL_TEMPLATE % id
-            os.system('wget -q %s -P img' % url)
+        while j < IMAGE_COLUMNS:
+            id = random.choice(ids)
+            if id in seen:
+                continue
+            seen.append(id)
 
-        seen.append(id)
+            imgpath = get_image(id)
 
-        try:
-            congress_image = Image.open(imgpath)
-        except IOError:
-            continue
+            try:
+                congress_image = Image.open(imgpath)
+            except IOError:
+                continue
 
-        if i % images_per_column == 0:
-            if not min_height or total_height < min_height:
-                min_height = total_height
-            coordinates[0] = column_multiplier * image_width
-            coordinates[1] = 0
-            last_y = 0
-            column_multiplier +=1
-            total_height = 0
+            logger.info('Pasting {0} at {1}, {2}'.format(imgpath, coordinates[0], coordinates[1]))
 
-        width, height = congress_image.size
-        ratio = width / float(image_width)
-        new_height = int(height / ratio)
-        resized = congress_image.resize((image_width, new_height), Image.ANTIALIAS)
-        coordinates[1] = coordinates[1] + last_y
+            image.paste(congress_image, tuple(coordinates))
+            coordinates[0] += BASE_WIDTH
+            j += 1
 
-        image.paste(resized, tuple(coordinates))
-        last_y = new_height
-        total_height += new_height
-
+        coordinates[0] = 0
+        coordinates[1] += BASE_HEIGHT
         i += 1
 
-    min_prop_width = min_height * 16 / float(9)
-    # Make the proportion fit the highest full thumbnail width
-    # that complies with the proportion
-    final_width = int(min_prop_width / image_width) * image_width
-    cropped = image.crop((0, 0, final_width, min_height))
-    # via http://stackoverflow.com/questions/1405602/how-to-adjust-the-quality-of-a-resized-image-in-python-imaging-library
+    image.save('congress-uncropped.jpg', quality=95)
+
+    cropped = cropped_thumbnail(image, [4050, 2278])
     cropped.save('congress.jpg', quality=95)
 
 
